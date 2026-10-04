@@ -1,0 +1,15 @@
+name: NOX STAR iOS Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-15
+
+    steps:
+      - name: Test
+        run: |
+          echo "NOX STAR iOS BUILD WORKFLOW IS WORKING"
+          sw_vers
+          xcodebuild -version
