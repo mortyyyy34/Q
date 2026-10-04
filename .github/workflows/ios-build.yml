@@ -2,236 +2,80 @@ name: NOX STAR iOS Build
 
 on:
   workflow_dispatch:
+    inputs:
+      apple_team_id:
+        description: "Apple Team ID (10 characters)"
+        required: true
+        type: string
 
 jobs:
   build-ios:
+    name: Build NOX STAR for iOS
     runs-on: macos-15-intel
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
+
+      # --------------------------------------------------
+      # 1. CHECKOUT
+      # --------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find and unpack NOX STAR project
+      # --------------------------------------------------
+      # 2. FIND NOX STAR ZIP
+      # --------------------------------------------------
+
+      - name: Find NOX STAR project
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)"
+          echo "Searching for NOX STAR ZIP..."
+
+          ZIP_FILE="$(
+            find "$GITHUB_WORKSPACE" \
+              -maxdepth 2 \
+              -type f \
+              -iname '*.zip' \
+              ! -path '*/build/*' \
+              | head -n 1
+          )"
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: NOX STAR ZIP not found"
+            echo "ERROR: NOX STAR ZIP not found."
+
+            find "$GITHUB_WORKSPACE" \
+              -maxdepth 3 \
+              -type f \
+              | head -200
+
             exit 1
           fi
 
-          echo "Using project ZIP:"
+          echo "Found:"
           echo "$ZIP_FILE"
 
-          mkdir -p nox_project
+          rm -rf "$GITHUB_WORKSPACE/nox_project"
 
-          unzip -q "$ZIP_FILE" -d nox_project
-
-          PROJECT="$(find nox_project -type f -name 'project.godot' | head -n 1)"
-
-          if [ -z "$PROJECT" ]; then
-            echo "ERROR: project.godot not found"
-
-            find nox_project -maxdepth 5 -type f | head -100
-
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$PROJECT")"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Godot project:"
-          echo "$PROJECT_DIR"
-
-      - name: Download Godot 4.5.1
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          curl -L --fail --retry 5 \
-            -o /tmp/godot.zip \
-            "https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_macos.universal.zip"
-
-          rm -rf /tmp/godot
-
-          mkdir -p /tmp/godot
-
-          unzip -q /tmp/godot.zip -d /tmp/godot
-
-          GODOT="/tmp/godot/Godot.app/Contents/MacOS/Godot"
-
-          if [ ! -x "$GODOT" ]; then
-            echo "ERROR: Godot executable not found"
-
-            find /tmp/godot -maxdepth 5 -type f | head -100
-
-            exit 1
-          fi
-
-          echo "Godot executable:"
-          echo "$GODOT"
-
-          "$GODOT" --headless --version
-
-          echo "GODOT=$GODOT" >> "$GITHUB_ENV"
-
-      - name: Download official Godot export templates
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "Downloading official Godot 4.5.1 export templates..."
-
-          curl -L --fail --retry 5 \
-            -o /tmp/templates.tpz \
-            "https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_export_templates.tpz"
-
-          echo "Export templates downloaded:"
-          ls -lh /tmp/templates.tpz
-
-      - name: Install official iOS export template
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          TEMPLATE_DIR="$HOME/Library/Application Support/Godot/export_templates/4.5.1.stable"
-
-          rm -rf /tmp/templates
-
-          mkdir -p /tmp/templates
-
-          unzip -q /tmp/templates.tpz -d /tmp/templates
-
-          echo "Searching official template package for ios.zip..."
-
-          IOS_TEMPLATE="$(find /tmp/templates \
-            -type f \
-            -name 'ios.zip' \
-            | head -n 1)"
-
-          if [ -z "$IOS_TEMPLATE" ]; then
-            echo "ERROR: ios.zip was not found inside the official export templates package."
-
-            echo "Package contents:"
-            find /tmp/templates \
-              -maxdepth 5 \
-              -type f \
-              | head -200
-
-            exit 1
-          fi
-
-          mkdir -p "$TEMPLATE_DIR"
-
-          cp "$IOS_TEMPLATE" "$TEMPLATE_DIR/ios.zip"
-
-          echo "iOS template installed:"
-          ls -lh "$TEMPLATE_DIR/ios.zip"
-
-      - name: Create iOS export preset
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cat > "$PROJECT_DIR/export_presets.cfg" <<'EOF'
-          [preset.0]
-
-          name="iOS"
-          platform="iOS"
-          runnable=true
-          dedicated_server=false
-          custom_features=""
-          export_filter="all_resources"
-          include_filter=""
-          exclude_filter=""
-          export_path=""
-
-          [preset.0.options]
-
-          application/app_store_team_id="0000000000"
-          application/bundle_identifier="com.noxstar.game"
-          application/short_version="1.0"
-          application/version="1.0"
-
-          architectures/arm64=true
-
-          user_data/accessible_from_files_app=false
-          user_data/accessible_from_itunes_sharing=false
-
-          application/export_project_only=true
-          EOF
-
-          echo "iOS export preset:"
-          cat "$PROJECT_DIR/export_presets.cfg"
-
-      - name: Validate Godot project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          "$GODOT" \
-            --headless \
-            --path "$PROJECT_DIR" \
-            --editor \
-            --quit-after 3
-
-      - name: Export iOS Xcode project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          rm -rf build
-
-          mkdir -p build/ios
-
-          echo "Exporting NOX STAR to iOS..."
-
-          "$GODOT" \
-            --headless \
-            --path "$PROJECT_DIR" \
-            --export-debug \
-            "iOS" \
-            "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip"
-
-          if [ ! -f "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip" ]; then
-            echo "ERROR: Godot did not create NOXSTAR.zip"
-
-            find build/ios \
-              -maxdepth 5 \
-              -type f \
-              | head -200
-
-            exit 1
-          fi
-
-          echo "iOS Xcode export created:"
-          ls -lh "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip"
-
-      - name: Unpack generated Xcode project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p build/xcode
+          mkdir -p "$GITHUB_WORKSPACE/nox_project"
 
           unzip -q \
-            build/ios/NOXSTAR.zip \
-            -d build/xcode
+            "$ZIP_FILE" \
+            -d "$GITHUB_WORKSPACE/nox_project"
 
-          XCODEPROJ="$(find build/xcode \
-            -type d \
-            -name '*.xcodeproj' \
-            | head -n 1)"
+          PROJECT_FILE="$(
+            find "$GITHUB_WORKSPACE/nox_project" \
+              -type f \
+              -name 'project.godot' \
+              | head -n 1
+          )"
 
-          if [ -z "$XCODEPROJ" ]; then
-            echo "ERROR: Xcode project was not generated."
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: project.godot not found."
 
-            find build/xcode \
+            find "$GITHUB_WORKSPACE/nox_project" \
               -maxdepth 6 \
               -type f \
               | head -200
@@ -239,10 +83,400 @@ jobs:
             exit 1
           fi
 
+          PROJECT_DIR="$(dirname "$PROJECT_FILE")"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "NOX STAR project:"
+          echo "$PROJECT_DIR"
+
+      # --------------------------------------------------
+      # 3. CHECK APPLE TEAM ID
+      # --------------------------------------------------
+
+      - name: Validate Apple Team ID
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+        run: |
+          set -euo pipefail
+
+          echo "Checking Apple Team ID..."
+
+          if [ -z "$APPLE_TEAM_ID" ]; then
+            echo "ERROR: Apple Team ID is empty."
+            exit 1
+          fi
+
+          if ! [[ "$APPLE_TEAM_ID" =~ ^[A-Za-z0-9]{10}$ ]]; then
+            echo "ERROR: Apple Team ID must contain exactly 10 letters/numbers."
+            echo "Length received: ${#APPLE_TEAM_ID}"
+            exit 1
+          fi
+
+          echo "Apple Team ID format: OK"
+
+      # --------------------------------------------------
+      # 4. CHECK XCODE
+      # --------------------------------------------------
+
+      - name: Check Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Xcode:"
+          xcodebuild -version
+
+          echo
+          echo "Developer directory:"
+          xcode-select -p
+
+          echo
+          echo "iPhoneOS SDK:"
+          xcrun --sdk iphoneos --show-sdk-path
+
+          echo
+          echo "iPhoneOS SDK version:"
+          xcrun --sdk iphoneos --show-sdk-version
+
+      # --------------------------------------------------
+      # 5. DOWNLOAD GODOT
+      # --------------------------------------------------
+
+      - name: Download Godot 4.5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GODOT_URL="https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_macos.universal.zip"
+
+          echo "Downloading Godot..."
+
+          curl \
+            --location \
+            --fail \
+            --retry 5 \
+            --retry-all-errors \
+            --connect-timeout 30 \
+            --max-time 600 \
+            -o /tmp/godot.zip \
+            "$GODOT_URL"
+
+          rm -rf /tmp/godot
+
+          mkdir -p /tmp/godot
+
+          unzip -q \
+            /tmp/godot.zip \
+            -d /tmp/godot
+
+          GODOT_BIN="/tmp/godot/Godot.app/Contents/MacOS/Godot"
+
+          if [ ! -x "$GODOT_BIN" ]; then
+            echo "ERROR: Godot executable not found."
+
+            find /tmp/godot \
+              -maxdepth 6 \
+              -type f \
+              | head -200
+
+            exit 1
+          fi
+
+          echo "Godot executable:"
+          echo "$GODOT_BIN"
+
+          echo
+          echo "Godot version:"
+
+          "$GODOT_BIN" \
+            --headless \
+            --version
+
+          echo "GODOT=$GODOT_BIN" >> "$GITHUB_ENV"
+
+      # --------------------------------------------------
+      # 6. DOWNLOAD OFFICIAL EXPORT TEMPLATES
+      # --------------------------------------------------
+
+      - name: Download official Godot export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TEMPLATES_URL="https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_export_templates.tpz"
+
+          echo "Downloading official export templates..."
+
+          curl \
+            --location \
+            --fail \
+            --retry 5 \
+            --retry-all-errors \
+            --connect-timeout 30 \
+            --max-time 1800 \
+            -o /tmp/godot_templates.tpz \
+            "$TEMPLATES_URL"
+
+          echo
+          echo "Template package:"
+          ls -lh /tmp/godot_templates.tpz
+
+      # --------------------------------------------------
+      # 7. INSTALL IOS TEMPLATE
+      # --------------------------------------------------
+
+      - name: Install official iOS template
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TEMPLATE_ROOT="$HOME/Library/Application Support/Godot/export_templates/4.5.1.stable"
+
+          rm -rf /tmp/godot_templates
+
+          mkdir -p /tmp/godot_templates
+
+          echo "Extracting official templates..."
+
+          unzip -q \
+            /tmp/godot_templates.tpz \
+            -d /tmp/godot_templates
+
+          echo "Searching for ios.zip..."
+
+          IOS_TEMPLATE="$(
+            find /tmp/godot_templates \
+              -type f \
+              -name 'ios.zip' \
+              | head -n 1
+          )"
+
+          if [ -z "$IOS_TEMPLATE" ]; then
+            echo "ERROR: ios.zip was not found."
+
+            echo
+            echo "Template contents:"
+
+            find /tmp/godot_templates \
+              -maxdepth 7 \
+              -type f \
+              | head -300
+
+            exit 1
+          fi
+
+          echo "Found iOS template:"
+          echo "$IOS_TEMPLATE"
+
+          mkdir -p "$TEMPLATE_ROOT"
+
+          cp \
+            "$IOS_TEMPLATE" \
+            "$TEMPLATE_ROOT/ios.zip"
+
+          echo
+          echo "Installed iOS template:"
+          ls -lh "$TEMPLATE_ROOT/ios.zip"
+
+      # --------------------------------------------------
+      # 8. CREATE CORRECT IOS EXPORT PRESET
+      # --------------------------------------------------
+
+      - name: Create iOS export preset
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+        run: |
+          set -euo pipefail
+
+          echo "Creating export_presets.cfg..."
+
+          cat > "$PROJECT_DIR/export_presets.cfg" <<EOF
+          [preset.0]
+
+          name="iOS"
+          platform="iOS"
+          runnable=true
+          advanced_options=false
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path=""
+          patches=PackedStringArray()
+          patch_delta_encoding=false
+          patch_delta_compression_level_zstd=19
+          patch_delta_min_reduction=0.1
+          patch_delta_include_filters="*"
+          patch_delta_exclude_filters="*"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+          script_export_mode=2
+
+          [preset.0.options]
+
+          custom_template/debug=""
+          custom_template/release=""
+
+          architectures/arm64=true
+
+          application/app_store_team_id="$APPLE_TEAM_ID"
+          application/export_method_debug=1
+          application/code_sign_identity_debug=""
+          application/code_sign_identity_release=""
+          application/provisioning_profile_specifier_debug=""
+          application/provisioning_profile_specifier_release=""
+          application/export_method_release=0
+
+          application/bundle_identifier="com.noxstar.game"
+          application/signature=""
+          application/short_version="1.0"
+          application/version="1.0.0"
+          application/additional_plist_content=""
+
+          application/icon_interpolation=4
+
+          application/export_project_only=true
+          application/delete_old_export_files_unconditionally=true
+
+          application/targeted_device_family=1
+
+          application/min_ios_version="14.0"
+
+          capabilities/access_wifi=true
+          capabilities/push_notifications=false
+          capabilities/performance_gaming_tier=true
+          capabilities/performance_a12=true
+          capabilities/additional=PackedStringArray()
+
+          user_data/accessible_from_files_app=false
+          user_data/accessible_from_itunes_sharing=false
+
+          privacy/camera_usage_description=""
+          privacy/microphone_usage_description=""
+          privacy/photolibrary_usage_description=""
+
+          privacy/camera_usage_description_localized={}
+          privacy/microphone_usage_description_localized={}
+          privacy/photolibrary_usage_description_localized={}
+
+          shader_baker/enabled=false
+          EOF
+
+          echo "Export preset created."
+
+          echo
+          echo "===== export_presets.cfg ====="
+
+          cat "$PROJECT_DIR/export_presets.cfg"
+
+          echo
+          echo "===== END ====="
+
+      # --------------------------------------------------
+      # 9. VALIDATE PROJECT
+      # --------------------------------------------------
+
+      - name: Validate Godot project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Validating NOX STAR..."
+
+          "$GODOT" \
+            --headless \
+            --path "$PROJECT_DIR" \
+            --editor \
+            --quit-after 3
+
+          echo "Godot project validation: OK"
+
+      # --------------------------------------------------
+      # 10. EXPORT XCODE PROJECT
+      # --------------------------------------------------
+
+      - name: Export iOS Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "$GITHUB_WORKSPACE/build"
+
+          mkdir -p \
+            "$GITHUB_WORKSPACE/build/ios"
+
+          IOS_EXPORT_DIR="$GITHUB_WORKSPACE/build/ios/NOXSTAR"
+
+          mkdir -p "$IOS_EXPORT_DIR"
+
+          echo "Export destination:"
+          echo "$IOS_EXPORT_DIR"
+
+          echo
+          echo "Exporting NOX STAR to iOS Xcode project..."
+
+          "$GODOT" \
+            --headless \
+            --path "$PROJECT_DIR" \
+            --export-debug \
+            "iOS" \
+            "$IOS_EXPORT_DIR"
+
+          echo
+          echo "Godot export command finished."
+
+          echo
+          echo "Generated files:"
+
+          find "$IOS_EXPORT_DIR" \
+            -maxdepth 4 \
+            -type f \
+            | head -200
+
+      # --------------------------------------------------
+      # 11. FIND XCODE PROJECT
+      # --------------------------------------------------
+
+      - name: Find generated Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          XCODEPROJ="$(
+            find "$GITHUB_WORKSPACE/build/ios" \
+              -type d \
+              -name '*.xcodeproj' \
+              | head -n 1
+          )"
+
+          if [ -z "$XCODEPROJ" ]; then
+            echo "ERROR: Xcode project was not generated."
+
+            echo
+            echo "Export directory contents:"
+
+            find "$GITHUB_WORKSPACE/build/ios" \
+              -maxdepth 7 \
+              -type f \
+              | head -300
+
+            exit 1
+          fi
+
           echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
 
-          echo "Xcode project:"
+          echo "Xcode project found:"
           echo "$XCODEPROJ"
+
+      # --------------------------------------------------
+      # 12. FIND SCHEME
+      # --------------------------------------------------
 
       - name: Find Xcode scheme
         shell: bash
@@ -259,9 +493,9 @@ jobs:
           )"
 
           if [ -z "$SCHEME" ]; then
-            echo "ERROR: Xcode scheme not found"
+            echo "ERROR: Xcode scheme not found."
 
-            find build/xcode \
+            find "$GITHUB_WORKSPACE/build/ios" \
               -name '*.xcscheme'
 
             exit 1
@@ -272,14 +506,43 @@ jobs:
           echo "Xcode scheme:"
           echo "$SCHEME"
 
+      # --------------------------------------------------
+      # 13. SHOW XCODE INFORMATION
+      # --------------------------------------------------
+
+      - name: Inspect Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Project:"
+          echo "$XCODEPROJ"
+
+          echo
+          echo "Scheme:"
+          echo "$SCHEME"
+
+          echo
+          echo "Available destinations:"
+
+          xcodebuild \
+            -project "$XCODEPROJ" \
+            -scheme "$SCHEME" \
+            -showdestinations \
+            || true
+
+      # --------------------------------------------------
+      # 14. BUILD UNSIGNED APP
+      # --------------------------------------------------
+
       - name: Build unsigned iOS app
         shell: bash
         run: |
           set -euo pipefail
 
-          rm -rf build/derived
+          rm -rf "$GITHUB_WORKSPACE/build/derived"
 
-          echo "Building unsigned NOX STAR iOS app..."
+          echo "Building unsigned NOX STAR..."
 
           xcodebuild \
             -project "$XCODEPROJ" \
@@ -291,13 +554,17 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
+      # --------------------------------------------------
+      # 15. FIND APP
+      # --------------------------------------------------
+
       - name: Locate NOX STAR app
         shell: bash
         run: |
           set -euo pipefail
 
           APP="$(
-            find build/derived/Build/Products \
+            find "$GITHUB_WORKSPACE/build/derived/Build/Products" \
               -type d \
               -name '*.app' \
               -path '*iphoneos*' \
@@ -305,9 +572,12 @@ jobs:
           )"
 
           if [ -z "$APP" ]; then
-            echo "ERROR: NOX STAR .app not found"
+            echo "ERROR: NOX STAR .app was not produced."
 
-            find build/derived \
+            echo
+            echo "Searching entire derived directory..."
+
+            find "$GITHUB_WORKSPACE/build/derived" \
               -type d \
               -name '*.app'
 
@@ -316,35 +586,60 @@ jobs:
 
           echo "APP=$APP" >> "$GITHUB_ENV"
 
-          echo "NOX STAR app:"
+          echo "NOX STAR APP:"
           echo "$APP"
+
+      # --------------------------------------------------
+      # 16. CREATE IPA
+      # --------------------------------------------------
 
       - name: Create unsigned IPA
         shell: bash
         run: |
           set -euo pipefail
 
-          rm -rf build/ipa
+          rm -rf "$GITHUB_WORKSPACE/build/ipa"
 
-          mkdir -p build/ipa/Payload
+          mkdir -p \
+            "$GITHUB_WORKSPACE/build/ipa/Payload"
 
           cp -R \
             "$APP" \
-            build/ipa/Payload/NOXSTAR.app
+            "$GITHUB_WORKSPACE/build/ipa/Payload/NOXSTAR.app"
 
-          cd build/ipa
+          cd "$GITHUB_WORKSPACE/build/ipa"
 
-          zip -qry \
+          zip \
+            -qry \
             NOX_STAR_UNSIGNED.ipa \
             Payload
 
-          echo "Unsigned IPA created:"
+          echo
+          echo "===== IPA ====="
 
-          ls -lh NOX_STAR_UNSIGNED.ipa
+          ls -lh \
+            NOX_STAR_UNSIGNED.ipa
+
+      # --------------------------------------------------
+      # 17. UPLOAD IPA
+      # --------------------------------------------------
 
       - name: Upload NOX STAR IPA
         uses: actions/upload-artifact@v4
         with:
           name: NOX-STAR-iOS-UNSIGNED
           path: build/ipa/NOX_STAR_UNSIGNED.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      # --------------------------------------------------
+      # 18. UPLOAD XCODE PROJECT TOO
+      # --------------------------------------------------
+
+      - name: Upload Xcode project
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOX-STAR-XCODE-PROJECT
+          path: build/ios/NOXSTAR
+          if-no-files-found: error
           retention-days: 7
