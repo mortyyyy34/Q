@@ -24,16 +24,20 @@ jobs:
             exit 1
           fi
 
-          echo "Using ZIP: $ZIP_FILE"
+          echo "Using project ZIP:"
+          echo "$ZIP_FILE"
 
           mkdir -p nox_project
+
           unzip -q "$ZIP_FILE" -d nox_project
 
           PROJECT="$(find nox_project -type f -name 'project.godot' | head -n 1)"
 
           if [ -z "$PROJECT" ]; then
             echo "ERROR: project.godot not found"
+
             find nox_project -maxdepth 5 -type f | head -100
+
             exit 1
           fi
 
@@ -54,6 +58,7 @@ jobs:
             "https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_macos.universal.zip"
 
           rm -rf /tmp/godot
+
           mkdir -p /tmp/godot
 
           unzip -q /tmp/godot.zip -d /tmp/godot
@@ -75,27 +80,57 @@ jobs:
 
           echo "GODOT=$GODOT" >> "$GITHUB_ENV"
 
-      - name: Download official Godot iOS template
+      - name: Download official Godot export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Downloading official Godot 4.5.1 export templates..."
+
+          curl -L --fail --retry 5 \
+            -o /tmp/templates.tpz \
+            "https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_export_templates.tpz"
+
+          echo "Export templates downloaded:"
+          ls -lh /tmp/templates.tpz
+
+      - name: Install official iOS export template
         shell: bash
         run: |
           set -euo pipefail
 
           TEMPLATE_DIR="$HOME/Library/Application Support/Godot/export_templates/4.5.1.stable"
 
+          rm -rf /tmp/templates
+
+          mkdir -p /tmp/templates
+
+          unzip -q /tmp/templates.tpz -d /tmp/templates
+
+          echo "Searching official template package for ios.zip..."
+
+          IOS_TEMPLATE="$(find /tmp/templates \
+            -type f \
+            -name 'ios.zip' \
+            | head -n 1)"
+
+          if [ -z "$IOS_TEMPLATE" ]; then
+            echo "ERROR: ios.zip was not found inside the official export templates package."
+
+            echo "Package contents:"
+            find /tmp/templates \
+              -maxdepth 5 \
+              -type f \
+              | head -200
+
+            exit 1
+          fi
+
           mkdir -p "$TEMPLATE_DIR"
 
-          echo "Downloading official Godot iOS template..."
+          cp "$IOS_TEMPLATE" "$TEMPLATE_DIR/ios.zip"
 
-          curl -L --fail --retry 5 \
-            -o /tmp/ios.zip.zip \
-            "https://github.com/godotengine/godot-builds/releases/download/4.5.1-stable/ios.zip.zip"
-
-          echo "Downloaded template:"
-          ls -lh /tmp/ios.zip.zip
-
-          cp /tmp/ios.zip.zip "$TEMPLATE_DIR/ios.zip"
-
-          echo "Installed template:"
+          echo "iOS template installed:"
           ls -lh "$TEMPLATE_DIR/ios.zip"
 
       - name: Create iOS export preset
@@ -118,6 +153,7 @@ jobs:
 
           [preset.0.options]
 
+          application/app_store_team_id="0000000000"
           application/bundle_identifier="com.noxstar.game"
           application/short_version="1.0"
           application/version="1.0"
@@ -130,7 +166,7 @@ jobs:
           application/export_project_only=true
           EOF
 
-          echo "iOS export preset created:"
+          echo "iOS export preset:"
           cat "$PROJECT_DIR/export_presets.cfg"
 
       - name: Validate Godot project
@@ -153,6 +189,8 @@ jobs:
 
           mkdir -p build/ios
 
+          echo "Exporting NOX STAR to iOS..."
+
           "$GODOT" \
             --headless \
             --path "$PROJECT_DIR" \
@@ -160,9 +198,18 @@ jobs:
             "iOS" \
             "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip"
 
-          echo "Godot iOS export completed."
+          if [ ! -f "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip" ]; then
+            echo "ERROR: Godot did not create NOXSTAR.zip"
 
-          echo "Generated export:"
+            find build/ios \
+              -maxdepth 5 \
+              -type f \
+              | head -200
+
+            exit 1
+          fi
+
+          echo "iOS Xcode export created:"
           ls -lh "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip"
 
       - name: Unpack generated Xcode project
@@ -176,9 +223,10 @@ jobs:
             build/ios/NOXSTAR.zip \
             -d build/xcode
 
-          echo "Searching for Xcode project..."
-
-          XCODEPROJ="$(find build/xcode -type d -name '*.xcodeproj' | head -n 1)"
+          XCODEPROJ="$(find build/xcode \
+            -type d \
+            -name '*.xcodeproj' \
+            | head -n 1)"
 
           if [ -z "$XCODEPROJ" ]; then
             echo "ERROR: Xcode project was not generated."
@@ -231,7 +279,7 @@ jobs:
 
           rm -rf build/derived
 
-          echo "Building unsigned iOS app..."
+          echo "Building unsigned NOX STAR iOS app..."
 
           xcodebuild \
             -project "$XCODEPROJ" \
