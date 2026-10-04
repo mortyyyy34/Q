@@ -66,9 +66,7 @@ jobs:
             exit 1
           fi
 
-          echo "Godot executable:"
-          echo "$GODOT"
-
+          echo "Godot:"
           "$GODOT" --headless --version
 
           echo "GODOT=$GODOT" >> "$GITHUB_ENV"
@@ -82,11 +80,37 @@ jobs:
 
           mkdir -p "$TEMPLATE_DIR"
 
+          API_URL="https://api.github.com/repos/godotengine/godot/releases/tags/4.5.1-stable"
+
+          IOS_URL="$(
+            curl -L --fail "$API_URL" |
+            python3 -c '
+          import json
+          import sys
+
+          data = json.load(sys.stdin)
+
+          for asset in data.get("assets", []):
+              name = asset.get("name", "")
+              url = asset.get("browser_download_url", "")
+
+              if name == "ios.zip.zip":
+                  print(url)
+                  break
+          else:
+              print("ERROR: ios.zip.zip not found", file=sys.stderr)
+              sys.exit(1)
+          '
+          )"
+
+          echo "Official iOS template:"
+          echo "$IOS_URL"
+
           curl -L --fail --retry 3 \
             -o "$TEMPLATE_DIR/ios.zip" \
-            "https://github.com/godotengine/godot/releases/download/4.5.1-stable/ios.zip.zip"
+            "$IOS_URL"
 
-          echo "Official iOS template installed:"
+          echo "Installed iOS template:"
           ls -lh "$TEMPLATE_DIR/ios.zip"
 
       - name: Create iOS export preset
@@ -121,8 +145,7 @@ jobs:
           application/export_project_only=true
           EOF
 
-          echo "iOS export preset:"
-          cat "$PROJECT_DIR/export_presets.cfg"
+          echo "iOS preset created."
 
       - name: Validate Godot project
         shell: bash
@@ -148,22 +171,28 @@ jobs:
             --path "$PROJECT_DIR" \
             --export-debug \
             "iOS" \
-            "$GITHUB_WORKSPACE/build/ios"
+            "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip"
 
           echo "Godot iOS export completed."
 
-          find build/ios -maxdepth 4 -type f | head -100
+          ls -lh "$GITHUB_WORKSPACE/build/ios/NOXSTAR.zip"
 
-      - name: Find generated Xcode project
+      - name: Unpack Xcode project
         shell: bash
         run: |
           set -euo pipefail
 
-          XCODEPROJ="$(find build/ios -type d -name '*.xcodeproj' | head -n 1)"
+          mkdir -p build/xcode
+
+          unzip -q \
+            build/ios/NOXSTAR.zip \
+            -d build/xcode
+
+          XCODEPROJ="$(find build/xcode -type d -name '*.xcodeproj' | head -n 1)"
 
           if [ -z "$XCODEPROJ" ]; then
-            echo "ERROR: Xcode project was not generated."
-            find build/ios -maxdepth 6 -type f | head -200
+            echo "ERROR: Xcode project not found"
+            find build/xcode -maxdepth 6 -type f | head -200
             exit 1
           fi
 
@@ -186,7 +215,7 @@ jobs:
 
           if [ -z "$SCHEME" ]; then
             echo "ERROR: Xcode scheme not found"
-            find build/ios -name '*.xcscheme'
+            find build/xcode -name '*.xcscheme'
             exit 1
           fi
 
@@ -252,7 +281,7 @@ jobs:
             NOX_STAR_UNSIGNED.ipa \
             Payload
 
-          echo "Unsigned IPA created:"
+          echo "IPA created:"
           ls -lh NOX_STAR_UNSIGNED.ipa
 
       - name: Upload NOX STAR IPA
